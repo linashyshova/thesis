@@ -10,8 +10,8 @@ def ttest(df, split_feature, feature, alpha=0.05):
     treatment = df.loc[df[split_feature] == True, feature]
 
     result = ttest_ind(
-        control,
         treatment,
+        control,
         equal_var=False,
         nan_policy="omit",
         alternative="two-sided",
@@ -21,7 +21,7 @@ def ttest(df, split_feature, feature, alpha=0.05):
     ci_width = ci_base.high - ci_base.low
     reject = int(result.pvalue < alpha)
 
-    return ci_width, reject
+    return ci_width, reject, float(ci_base.low), float(ci_base.high)
 
 
 def cuped(df, split_feature, pre_feature, feature, alpha=0.05):
@@ -38,13 +38,13 @@ def cuped(df, split_feature, pre_feature, feature, alpha=0.05):
     control_adj = control - theta * (control_pre - mean_X)
     treatment_adj = treatment - theta * (treatment_pre - mean_X)
 
-    result = ttest_ind(control_adj, treatment_adj, equal_var=False, alternative="two-sided")
+    result = ttest_ind(treatment_adj, control_adj, equal_var=False, alternative="two-sided")
 
     ci = result.confidence_interval(confidence_level=1 - alpha)
     ci_width = ci.high - ci.low
     reject = int(result.pvalue < alpha)
 
-    return ci_width, reject
+    return ci_width, reject, float(ci.low), float(ci.high)
 
 
 def stratification(df, split_feature, feature, strat_feature, alpha=0.05):
@@ -75,11 +75,13 @@ def stratification(df, split_feature, feature, strat_feature, alpha=0.05):
 
     z = norm.ppf(1 - alpha / 2)
     ci_width = float(2 * z * se)
+    ci_low = float(tau - z * se)
+    ci_high = float(tau + z * se)
     p_value = float(2 * (1 - norm.cdf(abs(tau / se))))
 
     reject_strat = int(p_value < alpha)
 
-    return ci_width, reject_strat
+    return ci_width, reject_strat, ci_low, ci_high
 
 
 def compute_winsorization_bounds(params, n_calib, gamma, calib_seed=0):
@@ -96,6 +98,34 @@ def compute_winsorization_bounds(params, n_calib, gamma, calib_seed=0):
     return float(np.nanquantile(y0, gamma)), float(np.nanquantile(y0, 1 - gamma))
 
 
+def compute_oracle_tau(params, c_lower, c_upper, discount_scale, oracle_seed=2, n_oracle=500_000):
+    oracle = generate_dataset(
+        n_per_group=n_oracle,
+        seed=oracle_seed,
+        summer_scale=params["summer_scale"],
+        discount_scale=discount_scale,
+        precision_scale=params["precision_scale"],
+        price_tail=params["price_tail"],
+        n_visits=params["n_visits"],
+    )
+    y0 = oracle.loc[oracle["is_discount"] == False, "outcome"].values
+    y1 = oracle.loc[oracle["is_discount"] == True, "outcome"].values
+    tau_raw = float(np.mean(y1) - np.mean(y0))
+    tau_wins = float(
+        np.mean(np.clip(y1, c_lower, c_upper)) - np.mean(np.clip(y0, c_lower, c_upper))
+    )
+    return {
+        "ttest": tau_raw,
+        "cuped": tau_raw,
+        "strat": tau_raw,
+        "strat+cuped": tau_raw,
+        "wins": tau_wins,
+        "wins+cuped": tau_wins,
+        "wins+strat": tau_wins,
+        "wins+strat+cuped": tau_wins,
+    }
+
+
 def winsorize(df, split_feature, feature, lower_bound, upper_bound, alpha=0.05):
     control = df.loc[df[split_feature] == False, feature].values.astype(float)
     treatment = df.loc[df[split_feature] == True, feature].values.astype(float)
@@ -103,13 +133,13 @@ def winsorize(df, split_feature, feature, lower_bound, upper_bound, alpha=0.05):
     control_w = np.clip(control, lower_bound, upper_bound)
     treatment_w = np.clip(treatment, lower_bound, upper_bound)
 
-    result = ttest_ind(control_w, treatment_w, equal_var=False, alternative="two-sided")
+    result = ttest_ind(treatment_w, control_w, equal_var=False, alternative="two-sided")
 
     ci = result.confidence_interval(confidence_level=1 - alpha)
     ci_width = ci.high - ci.low
     reject = int(result.pvalue < alpha)
 
-    return ci_width, reject
+    return ci_width, reject, float(ci.low), float(ci.high)
 
 
 def winsorized_cuped(df, split_feature, feature, pre_feature, lower_bound, upper_bound, alpha=0.05):
@@ -129,13 +159,13 @@ def winsorized_cuped(df, split_feature, feature, pre_feature, lower_bound, upper
     control_adj = control_w - theta * (control_pre - mean_X)
     treatment_adj = treatment_w - theta * (treatment_pre - mean_X)
 
-    result = ttest_ind(control_adj, treatment_adj, equal_var=False, alternative="two-sided")
+    result = ttest_ind(treatment_adj, control_adj, equal_var=False, alternative="two-sided")
 
     ci = result.confidence_interval(confidence_level=1 - alpha)
     ci_width = ci.high - ci.low
     reject = int(result.pvalue < alpha)
 
-    return ci_width, reject
+    return ci_width, reject, float(ci.low), float(ci.high)
 
 
 def winsorized_stratification(df, split_feature, feature, strat_feature, lower_bound, upper_bound, alpha=0.05):
