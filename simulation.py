@@ -19,8 +19,6 @@ COUNTRIES = [
 
 PRICE_MU_LOG = 6.4
 PRICE_SIGMA_LOG = 0.8
-PRICE_MIN = 0
-PRICE_MAX = 5000
 
 COUNTRY_PARAMS = {
     "US": {"base": -1.7, "summer": 0.25, "discount": 0.35, "precision": 20},
@@ -68,8 +66,7 @@ def get_conversion_distribution(country, is_discount, is_summer, summer_scale, d
 
 def sample_price(n, rng, price_tail):
     sigma = PRICE_SIGMA_LOG * price_tail
-    prices = rng.lognormal(mean=PRICE_MU_LOG, sigma=sigma, size=n)
-    return np.clip(prices, PRICE_MIN, PRICE_MAX)
+    return rng.lognormal(mean=PRICE_MU_LOG, sigma=sigma, size=n)
 
 
 def generate_dataset(
