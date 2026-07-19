@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 from scipy.stats import ttest_ind
+from simulation import generate_dataset
 
 
 def ttest(df, split_feature, feature, alpha=0.05):
@@ -81,12 +82,23 @@ def stratification(df, split_feature, feature, strat_feature, alpha=0.05):
     return ci_width, reject_strat
 
 
-def winsorize(df, split_feature, feature, alpha=0.05, trim_frac=0.01):
+def compute_winsorization_bounds(params, n_calib, gamma, calib_seed=0):
+    calib = generate_dataset(
+        n_per_group=n_calib,
+        seed=calib_seed,
+        summer_scale=params["summer_scale"],
+        discount_scale=0.0,
+        precision_scale=params["precision_scale"],
+        price_tail=params["price_tail"],
+        n_visits=params["n_visits"],
+    )
+    y0 = calib.loc[calib["is_discount"] == False, "outcome"].values
+    return float(np.nanquantile(y0, gamma)), float(np.nanquantile(y0, 1 - gamma))
+
+
+def winsorize(df, split_feature, feature, lower_bound, upper_bound, alpha=0.05):
     control = df.loc[df[split_feature] == False, feature].values.astype(float)
     treatment = df.loc[df[split_feature] == True, feature].values.astype(float)
-
-    lower_bound = np.quantile(control, trim_frac)
-    upper_bound = np.quantile(control, 1 - trim_frac)
 
     control_w = np.clip(control, lower_bound, upper_bound)
     treatment_w = np.clip(treatment, lower_bound, upper_bound)
@@ -100,17 +112,14 @@ def winsorize(df, split_feature, feature, alpha=0.05, trim_frac=0.01):
     return ci_width, reject
 
 
-def winsorized_cuped(df, split_feature, feature, pre_feature, alpha=0.05, trim_frac=0.01):
+def winsorized_cuped(df, split_feature, feature, pre_feature, lower_bound, upper_bound, alpha=0.05):
     control = df.loc[df[split_feature] == False, feature].values.astype(float)
     treatment = df.loc[df[split_feature] == True, feature].values.astype(float)
     control_pre = df.loc[df[split_feature] == False, pre_feature].values.astype(float)
     treatment_pre = df.loc[df[split_feature] == True, pre_feature].values.astype(float)
 
-    lower = np.quantile(control, trim_frac)
-    upper = np.quantile(control, 1 - trim_frac)
-
-    control_w = np.clip(control, lower, upper)
-    treatment_w = np.clip(treatment, lower, upper)
+    control_w = np.clip(control, lower_bound, upper_bound)
+    treatment_w = np.clip(treatment, lower_bound, upper_bound)
 
     cov = np.cov(control_w, control_pre)[0, 1]
     var_X = np.var(control_pre, ddof=1)
@@ -129,14 +138,9 @@ def winsorized_cuped(df, split_feature, feature, pre_feature, alpha=0.05, trim_f
     return ci_width, reject
 
 
-def winsorized_stratification(df, split_feature, feature, strat_feature, alpha=0.05, trim_frac=0.01):
-    control_vals = df.loc[df[split_feature] == False, feature].values.astype(float)
-
-    lower = np.quantile(control_vals, trim_frac)
-    upper = np.quantile(control_vals, 1 - trim_frac)
-
+def winsorized_stratification(df, split_feature, feature, strat_feature, lower_bound, upper_bound, alpha=0.05):
     df_w = df.copy()
-    df_w[feature] = df_w[feature].astype(float).clip(lower, upper)
+    df_w[feature] = df_w[feature].astype(float).clip(lower_bound, upper_bound)
 
     return stratification(df_w, split_feature, feature, strat_feature, alpha)
 
@@ -157,14 +161,9 @@ def stratified_cuped(df, split_feature, feature, pre_feature, strat_feature, alp
     return stratification(df_adj, split_feature, feature, strat_feature, alpha)
 
 
-def winsorized_stratified_cuped(df, split_feature, feature, pre_feature, strat_feature, alpha=0.05, trim_frac=0.01):
-    control_vals = df.loc[df[split_feature] == False, feature].values.astype(float)
-
-    lower = np.quantile(control_vals, trim_frac)
-    upper = np.quantile(control_vals, 1 - trim_frac)
-
+def winsorized_stratified_cuped(df, split_feature, feature, pre_feature, strat_feature, lower_bound, upper_bound, alpha=0.05):
     df_w = df.copy()
-    df_w[feature] = df_w[feature].astype(float).clip(lower, upper)
+    df_w[feature] = df_w[feature].astype(float).clip(lower_bound, upper_bound)
 
     control_w = df_w.loc[df_w[split_feature] == False, feature].values
     control_pre = df_w.loc[df_w[split_feature] == False, pre_feature].values
